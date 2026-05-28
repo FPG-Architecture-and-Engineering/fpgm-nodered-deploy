@@ -11,7 +11,7 @@ pipeline {
             choices: [
                 'docker && phdcpldev02',
                 'docker && payment-dev',
-                'docker &&payment-platform-prod'
+                'docker && payment-platform-prod'
             ],
             description: 'Target deployment server'
         )
