@@ -10,7 +10,8 @@ pipeline {
             name: 'TARGET_LABEL',
             choices: [
                 'docker && phdcpldev02',
-                'docker && payment-dev'
+                'docker && payment-dev',
+                'docker &&payment-platform-prod'
             ],
             description: 'Target deployment server'
         )
