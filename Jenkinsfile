@@ -97,12 +97,14 @@ TZ=Asia/Manila
                     def extraMounts = []
                     def extraHosts = []
                     def extraRaw = params.EXTRA_VOLUMES ?: ''
-                    extraRaw.split(/\r?\n/).each { rawLine ->
+                    extraRaw.split('\n').each { rawLine ->
                         def line = rawLine.trim()
                         if (!line || line.startsWith('#')) {
                             return
                         }
-                        if (!(line ==~ /\/[A-Za-z0-9._/-]+:\/[A-Za-z0-9._/-]+(:[a-zA-Z0-9,_]+)?/)) {
+                        // Use a String pattern: slashy /.../ regex cannot contain unescaped '/'.
+                        def extraVolumePattern = '^(/[A-Za-z0-9._-]+)+:(/[A-Za-z0-9._-]+)+(:[a-zA-Z0-9,_]+)?$'
+                        if (!(line ==~ extraVolumePattern)) {
                             error("Invalid EXTRA_VOLUMES entry '${line}'. Use /host/path:/container/path[:ro]")
                         }
                         def parts = line.split(':')
