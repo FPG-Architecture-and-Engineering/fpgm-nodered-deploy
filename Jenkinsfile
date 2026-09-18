@@ -34,6 +34,12 @@ pipeline {
             description: 'Base directory for persistent data. Each instance stores flows at <DEPLOY_DIR>/<APP_NAME>/data.'
         )
 
+        text(
+            name: 'EXTRA_VOLUMES',
+            defaultValue: '',
+            description: 'Optional extra host bind mounts, one per line: /host/path:/container/path[:ro]. Leave empty to skip. /data is reserved for Node-RED instance data.'
+        )
+
         string(
             name: 'IMAGE_TAG',
             defaultValue: 'latest',
@@ -88,14 +94,45 @@ TZ=Asia/Manila
                         env.NODE_RED_DATA_DIR = instanceData
                     }
 
+                    def extraMounts = []
+                    def extraHosts = []
+                    def extraRaw = params.EXTRA_VOLUMES ?: ''
+                    extraRaw.split(/\r?\n/).each { rawLine ->
+                        def line = rawLine.trim()
+                        if (!line || line.startsWith('#')) {
+                            return
+                        }
+                        if (!(line ==~ /\/[A-Za-z0-9._/-]+:\/[A-Za-z0-9._/-]+(:[a-zA-Z0-9,_]+)?/)) {
+                            error("Invalid EXTRA_VOLUMES entry '${line}'. Use /host/path:/container/path[:ro]")
+                        }
+                        def parts = line.split(':')
+                        def hostPath = parts[0]
+                        def containerPath = parts[1]
+                        if (hostPath.contains('..') || containerPath.contains('..')) {
+                            error("EXTRA_VOLUMES paths must not contain '..': ${line}")
+                        }
+                        if (containerPath == '/data') {
+                            error('EXTRA_VOLUMES cannot mount over /data; that path is reserved for Node-RED instance data.')
+                        }
+                        extraMounts << line
+                        extraHosts << hostPath
+                    }
+
                     env.APP_NAME = appName
                     env.DEPLOY_DIR = deployDir
+                    env.EXTRA_VOLUME_ARGS = extraMounts.collect { "-v ${it}" }.join(' ')
+                    env.EXTRA_VOLUME_HOSTS = extraHosts.join('|')
 
                     echo "Running on Jenkins node: ${env.NODE_NAME}"
                     echo "Using label selector: ${params.TARGET_LABEL}"
                     echo "Instance name: ${appName}"
                     echo "Host port: ${params.NODE_RED_PORT}"
                     echo "Node-RED data directory: ${env.NODE_RED_DATA_DIR}"
+                    if (extraMounts) {
+                        echo "Extra volumes:\n  ${extraMounts.join('\n  ')}"
+                    } else {
+                        echo 'Extra volumes: none'
+                    }
                 }
             }
         }
@@ -124,6 +161,21 @@ TZ=Asia/Manila
                         chown -R 1000:1000 /mnt/data &&
                         chmod -R 755 /mnt/data
                       "
+
+                    if [ -n "${EXTRA_VOLUME_HOSTS}" ]; then
+                      IFS='|'
+                      for host_dir in ${EXTRA_VOLUME_HOSTS}; do
+                        [ -z "${host_dir}" ] && continue
+                        if [ ! -e "${host_dir}" ]; then
+                          docker run --rm -u root \
+                            -v "${host_dir}:/mnt/vol" \
+                            alpine:latest sh -c "
+                              chown 1000:1000 /mnt/vol &&
+                              chmod 755 /mnt/vol
+                            "
+                        fi
+                      done
+                    fi
                 '''
             }
         }
@@ -153,6 +205,7 @@ ${NODE_RED_ENV}
                       -p ${NODE_RED_PORT}:1880 \
                       --env-file .env \
                       -v "${NODE_RED_DATA_DIR}:/data" \
+                      ${EXTRA_VOLUME_ARGS} \
                       ${IMAGE_NAME}:${IMAGE_TAG}
                 '''
             }
