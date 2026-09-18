@@ -41,6 +41,12 @@ pipeline {
         )
 
         string(
+            name: 'DOCKER_NETWORK',
+            defaultValue: '',
+            description: 'Optional Docker network to attach the container to (must already exist on the target host). Leave empty to use the default bridge network.'
+        )
+
+        string(
             name: 'IMAGE_TAG',
             defaultValue: 'latest',
             description: 'Docker image tag'
@@ -120,10 +126,28 @@ TZ=Asia/Manila
                         extraHosts << hostPath
                     }
 
+                    def dockerNetwork = params.DOCKER_NETWORK?.trim()
+                    def dockerNetworkArgs = ''
+                    if (dockerNetwork) {
+                        def networkNamePattern = '^[a-zA-Z0-9][a-zA-Z0-9_.-]*$'
+                        if (!(dockerNetwork ==~ networkNamePattern)) {
+                            error("DOCKER_NETWORK must be a valid Docker network name. Got: '${params.DOCKER_NETWORK}'")
+                        }
+                        def networkExists = sh(
+                            script: "docker network inspect '${dockerNetwork}' >/dev/null 2>&1",
+                            returnStatus: true
+                        ) == 0
+                        if (!networkExists) {
+                            error("Docker network '${dockerNetwork}' does not exist on this host. Create it first (docker network create ${dockerNetwork}) or leave DOCKER_NETWORK empty.")
+                        }
+                        dockerNetworkArgs = "--network ${dockerNetwork}"
+                    }
+
                     env.APP_NAME = appName
                     env.DEPLOY_DIR = deployDir
                     env.EXTRA_VOLUME_ARGS = extraMounts.collect { "-v ${it}" }.join(' ')
                     env.EXTRA_VOLUME_HOSTS = extraHosts.join('|')
+                    env.DOCKER_NETWORK_ARGS = dockerNetworkArgs
 
                     echo "Running on Jenkins node: ${env.NODE_NAME}"
                     echo "Using label selector: ${params.TARGET_LABEL}"
@@ -135,6 +159,7 @@ TZ=Asia/Manila
                     } else {
                         echo 'Extra volumes: none'
                     }
+                    echo "Docker network: ${dockerNetwork ?: 'default bridge'}"
                 }
             }
         }
@@ -204,6 +229,7 @@ ${NODE_RED_ENV}
                     docker run -d \
                       --name ${APP_NAME} \
                       --restart unless-stopped \
+                      ${DOCKER_NETWORK_ARGS} \
                       -p ${NODE_RED_PORT}:1880 \
                       --env-file .env \
                       -v "${NODE_RED_DATA_DIR}:/data" \
